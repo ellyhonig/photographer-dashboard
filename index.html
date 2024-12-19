@@ -1,0 +1,161 @@
+<!-- photographer.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Photographer Dashboard</title>
+    <!-- Include Bootstrap CSS -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <style>
+        /* Your existing CSS styles */
+        body {
+            background-color: #f7f7f7;
+        }
+        .container {
+            margin-top: 50px;
+            max-width: 500px;
+        }
+        .hidden {
+            display: none;
+        }
+        .btn-link {
+            margin-top: 10px;
+        }
+        #upload {
+            margin-top: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container text-center">
+        <h1>Photographer Dashboard</h1>
+        <button id="availableBtn" class="btn btn-primary mt-4">Get Next Code</button>
+        <p id="assignedCode" class="hidden mt-3">Assigned Code: <strong id="queueCode"></strong></p>
+        <input type="file" id="upload" class="hidden form-control-file mt-3" accept="image/*" multiple>
+        <button id="uploadBtn" class="hidden btn btn-success mt-3">Upload Photos</button>
+        <button id="removeTopBtn" class="btn btn-danger mt-4">Remove Top Person from Queue</button>
+        <div class="mt-4">
+           
+        </div>
+    </div>
+    <!-- Firebase SDK -->
+    <!-- Firebase App (the core Firebase SDK) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+    <!-- Add Firebase products that you want to use -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-storage-compat.js"></script>
+    <script>
+        // Your Firebase configuration details
+        const firebaseConfig = {
+  apiKey: "AIzaSyC0VaYgD8YzgTz1V-R4Crv2noMQF0TL-Ww",
+  authDomain: "sight-snap.firebaseapp.com",
+  projectId: "sight-snap",
+  storageBucket: "sight-snap.firebasestorage.app",
+  messagingSenderId: "742529133150",
+  appId: "1:742529133150:web:8ab1a667b53703c9cee2cf",
+  measurementId: "G-XLDW0L2DMS"
+};
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const storage = firebase.storage();
+
+        let currentCode = '';
+        let currentDocId = '';
+
+        async function getQueue() {
+            const querySnapshot = await db.collection("queue").orderBy("timestamp").get();
+            return querySnapshot.docs.map(doc => ({ id: doc.id, code: doc.data().code }));
+        }
+
+        async function removeFromQueue(id) {
+            await db.collection("queue").doc(id).delete();
+        }
+
+        // Function to set up the UI with the current code
+        function setupUIWithCurrentCode() {
+            if (currentCode) {
+                document.getElementById('queueCode').textContent = currentCode;
+                document.getElementById('assignedCode').classList.remove('hidden');
+                document.getElementById('upload').classList.remove('hidden');
+                document.getElementById('uploadBtn').classList.remove('hidden');
+            }
+        }
+
+        // Event listener for the "Get Next Code" button
+        document.getElementById('availableBtn').addEventListener('click', async function() {
+            const queue = await getQueue();
+            if (queue.length > 0) {
+                const firstInQueue = queue[0];
+                currentCode = firstInQueue.code;
+                currentDocId = firstInQueue.id;
+                // Remove the person from the queue
+                await removeFromQueue(currentDocId);
+                // Store currentCode in localStorage
+                localStorage.setItem('currentCode', currentCode);
+                // Set up the UI
+                setupUIWithCurrentCode();
+            } else {
+                alert('No one in the queue.');
+            }
+        });
+
+        // Event listener for the "Upload Photos" button
+        document.getElementById('uploadBtn').addEventListener('click', async function() {
+            if (!currentCode) {
+                alert('No code assigned. Please get the next code first.');
+                return;
+            }
+            const uploadInput = document.getElementById('upload');
+            if (uploadInput.files.length > 0) {
+                try {
+                    let files = uploadInput.files;
+                    let uploadPromises = [];
+                    for (let i = 0; i < files.length; i++) {
+                        const file = files[i];
+                        const storageRef = storage.ref(`photos/${currentCode}/${file.name}`);
+                        uploadPromises.push(storageRef.put(file));
+                    }
+                    await Promise.all(uploadPromises);
+                    alert('Photos uploaded for code: ' + currentCode);
+                    // Reset the UI
+                    document.getElementById('assignedCode').classList.add('hidden');
+                    document.getElementById('upload').classList.add('hidden');
+                    document.getElementById('uploadBtn').classList.add('hidden');
+                    document.getElementById('upload').value = '';
+                    // Clear currentCode from localStorage
+                    localStorage.removeItem('currentCode');
+                    currentCode = '';
+                    currentDocId = '';
+                } catch (error) {
+                    console.error('Error uploading photos:', error);
+                    alert('Error uploading photos: ' + error.message);
+                }
+            } else {
+                alert('Please select photos to upload.');
+            }
+        });
+
+        // Remove top person from queue
+        document.getElementById('removeTopBtn').addEventListener('click', async function() {
+            const queue = await getQueue();
+            if (queue.length > 0) {
+                const firstInQueue = queue[0];
+                await removeFromQueue(firstInQueue.id);
+                alert('Removed code: ' + firstInQueue.code + ' from the queue.');
+            } else {
+                alert('Queue is already empty.');
+            }
+        });
+
+        // On page load, retrieve the code from localStorage and set up the UI
+        window.onload = function() {
+            currentCode = localStorage.getItem('currentCode') || '';
+            if (currentCode) {
+                setupUIWithCurrentCode();
+            }
+        };
+    </script>
+</body>
+</html>
