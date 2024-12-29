@@ -4,6 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <title>Photographer Dashboard</title>
+
   <!-- Include Bootstrap CSS (CDN) -->
   <link
     rel="stylesheet"
@@ -27,6 +28,11 @@
     .list-group-item {
       cursor: pointer;
     }
+    /* This will highlight the selected code in the queue */
+    .list-group-item.active {
+      background-color: #007bff;
+      color: #ffffff;
+    }
     /* Mobile adjustments */
     @media (max-width: 576px) {
       h1 {
@@ -42,11 +48,14 @@
 <body>
 <div class="container">
   <h1 class="text-center">Photographer Dashboard</h1>
+  <p class="text-center"><em>Tap on a code to upload images for it</em></p>
 
   <!-- BUTTONS ROW -->
   <div class="text-center mt-4">
     <button id="availableBtn" class="btn btn-primary mb-3">Get Next Code</button>
-    <button id="removeTopBtn" class="btn btn-danger mb-3">Remove Top Person</button>
+    <button id="removeCurrentBtn" class="btn btn-danger mb-3">
+      Remove Currently Selected
+    </button>
   </div>
 
   <!-- ASSIGNED CODE LABEL -->
@@ -138,7 +147,8 @@
 
   /**
    * Render the queue list on the page.
-   * Clicking any code in the list sets that code as the currently assigned code.
+   * Clicking/tapping any code in the list sets that code as the currently assigned code
+   * and highlights that selection.
    */
   async function renderQueueList() {
     const queueList = document.getElementById('queueList');
@@ -150,8 +160,20 @@
       li.classList.add('list-group-item');
       li.textContent = item.code;
 
+      // Highlight if it's the currently selected code on page load
+      if (item.code === currentCode) {
+        li.classList.add('active');
+      }
+
       // On clicking a code in the list, assign that code
       li.addEventListener('click', () => {
+        // Remove 'active' from all items
+        const allItems = document.querySelectorAll('.list-group-item');
+        allItems.forEach((el) => el.classList.remove('active'));
+
+        // Make this item active
+        li.classList.add('active');
+
         currentCode = item.code;
         currentDocId = item.id;
         localStorage.setItem('currentCode', currentCode);
@@ -172,11 +194,20 @@
     const queue = await getQueue();
     if (queue.length > 0) {
       const firstInQueue = queue[0];
+
+      // Remove 'active' from all existing items first
+      const allItems = document.querySelectorAll('.list-group-item');
+      allItems.forEach((el) => el.classList.remove('active'));
+
+      // Set current code and highlight the first item
       currentCode = firstInQueue.code;
       currentDocId = firstInQueue.id;
       localStorage.setItem('currentCode', currentCode);
       localStorage.setItem('currentDocId', currentDocId);
       setupUIWithCurrentCode();
+
+      // Re-render the queue to reflect the highlight
+      await renderQueueList();
     } else {
       alert('No one in the queue.');
     }
@@ -189,7 +220,7 @@
    */
   document.getElementById('uploadBtn').addEventListener('click', async () => {
     if (!currentCode) {
-      alert('No code assigned. Please get the next code first or select from the list.');
+      alert('No code assigned. Please either get the next code or select one from the list.');
       return;
     }
 
@@ -237,19 +268,36 @@
   });
 
   /**
-   * "Remove Top Person from Queue" button:
-   * - Removes the first doc in the queue (regardless of your assigned code).
+   * "Remove Currently Selected" button:
+   * - Removes the doc currently selected in the queue, if any.
    */
-  document.getElementById('removeTopBtn').addEventListener('click', async () => {
-    const queue = await getQueue();
-    if (queue.length > 0) {
-      const firstInQueue = queue[0];
-      await removeFromQueue(firstInQueue.id);
-      alert('Removed code: ' + firstInQueue.code + ' from the queue.');
-      renderQueueList();
-    } else {
-      alert('Queue is already empty.');
+  document.getElementById('removeCurrentBtn').addEventListener('click', async () => {
+    if (!currentDocId) {
+      alert('No code is currently selected.');
+      return;
     }
+    try {
+      await removeFromQueue(currentDocId);
+      alert('Removed code: ' + currentCode + ' from the queue.');
+    } catch (err) {
+      console.error('Error removing selected code:', err);
+      alert('Error removing selected code: ' + err.message);
+    }
+
+    // Reset current code
+    currentCode = '';
+    currentDocId = '';
+    localStorage.removeItem('currentCode');
+    localStorage.removeItem('currentDocId');
+
+    // Hide assigned code UI
+    document.getElementById('assignedCode').classList.add('hidden');
+    document.getElementById('upload').classList.add('hidden');
+    document.getElementById('uploadBtn').classList.add('hidden');
+    document.getElementById('upload').value = '';
+
+    // Re-render the queue
+    renderQueueList();
   });
 
   // On page load, restore the code from localStorage if it exists
