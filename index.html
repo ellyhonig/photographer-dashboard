@@ -72,8 +72,12 @@
       accept="image/*"
       multiple
     />
+    <!-- Upload & Cancel buttons -->
     <button id="uploadBtn" class="hidden btn btn-success mt-3">
       Upload Photos
+    </button>
+    <button id="cancelBtn" class="hidden btn btn-secondary mt-3">
+      Cancel
     </button>
   </div>
 
@@ -114,6 +118,11 @@
 
   let currentCode = '';
   let currentDocId = '';
+
+  // We will store references to any images that got uploaded before confirmation.
+  // If user cancels or leaves page, these images get deleted from Storage.
+  let unconfirmedRefs = [];
+  let haveUploadsStarted = false; // whether we started any background upload
 
   /**
    * Grab the entire queue (ordered by timestamp).
@@ -160,7 +169,7 @@
       li.classList.add('list-group-item');
       li.textContent = item.code;
 
-      // Highlight if it's the currently selected code on page load
+      // Highlight if it's the currently selected code
       if (item.code === currentCode) {
         li.classList.add('active');
       }
@@ -187,8 +196,7 @@
 
   /**
    * "Get Next Code" button:
-   * - Grabs the first doc from the queue, does NOT remove it yet.
-   * - Just displays the code for the photographer to start working with.
+   * - Grabs the first doc from the queue (does NOT remove it).
    */
   document.getElementById('availableBtn').addEventListener('click', async () => {
     const queue = await getQueue();
@@ -199,14 +207,14 @@
       const allItems = document.querySelectorAll('.list-group-item');
       allItems.forEach((el) => el.classList.remove('active'));
 
-      // Set current code and highlight the first item
+      // Set current code
       currentCode = firstInQueue.code;
       currentDocId = firstInQueue.id;
       localStorage.setItem('currentCode', currentCode);
       localStorage.setItem('currentDocId', currentDocId);
       setupUIWithCurrentCode();
 
-      // Re-render the queue to reflect the highlight
+      // Re-render to highlight it
       await renderQueueList();
     } else {
       alert('No one in the queue.');
@@ -214,9 +222,76 @@
   });
 
   /**
-   * "Upload Photos" button:
-   * - Uploads selected photos to Storage under the assigned code folder.
-   * - After successful upload, removes that doc from the queue.
+   * Start background upload as soon as files are selected.
+   * We'll store references so we can delete them if user cancels or leaves.
+   */
+  document.getElementById('upload').addEventListener('change', async (e) => {
+    if (!currentCode) {
+      alert('Please select or retrieve a code first.');
+      // Clear selected files if no code is set
+      e.target.value = '';
+      return;
+    }
+
+    // Clear out old unconfirmed uploads if any
+    if (unconfirmedRefs.length > 0) {
+      await deleteUnconfirmedUploads();
+    }
+
+    // If nothing is selected, just hide cancel button
+    if (e.target.files.length === 0) {
+      document.getElementById('cancelBtn').classList.add('hidden');
+      return;
+    }
+
+    // We'll now start background upload
+    haveUploadsStarted = true;
+    const files = e.target.files;
+    const uploadPromises = [];
+    unconfirmedRefs = []; // reset
+
+    // Show the cancel button
+    document.getElementById('cancelBtn').classList.remove('hidden');
+
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const storageRef = storage.ref(`photos/${currentCode}/${file.name}`);
+        // Start put request
+        const uploadTask = storageRef.put(file);
+
+        // We'll store a promise that resolves to the final ref so we can track it
+        const p = new Promise((resolve, reject) => {
+          uploadTask.on(
+            'state_changed',
+            // progress handler (optional)
+            null,
+            // error handler
+            (error) => {
+              reject(error);
+            },
+            // completion handler
+            () => {
+              // Once fully uploaded, push the final ref (so we can delete if canceled)
+              unconfirmedRefs.push(uploadTask.snapshot.ref);
+              resolve();
+            }
+          );
+        });
+        uploadPromises.push(p);
+      }
+
+      // Wait for all uploads to finish in background
+      await Promise.all(uploadPromises);
+
+    } catch (error) {
+      console.error('Background upload error:', error);
+      alert('Error during background upload: ' + error.message);
+    }
+  });
+
+  /**
+   * If user presses "Upload Photos", confirm and remove from queue.
    */
   document.getElementById('uploadBtn').addEventListener('click', async () => {
     if (!currentCode) {
@@ -224,47 +299,45 @@
       return;
     }
 
+    // If no files were actually selected
     const uploadInput = document.getElementById('upload');
-    if (uploadInput.files.length > 0) {
-      try {
-        let files = uploadInput.files;
-        let uploadPromises = [];
-
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
-          const storageRef = storage.ref(`photos/${currentCode}/${file.name}`);
-          uploadPromises.push(storageRef.put(file));
-        }
-        await Promise.all(uploadPromises);
-
-        alert('Photos uploaded for code: ' + currentCode);
-
-        // Remove from queue ONLY after uploading
-        if (currentDocId) {
-          await removeFromQueue(currentDocId);
-        }
-
-        // Reset the UI
-        document.getElementById('assignedCode').classList.add('hidden');
-        document.getElementById('upload').classList.add('hidden');
-        document.getElementById('uploadBtn').classList.add('hidden');
-        document.getElementById('upload').value = '';
-
-        // Clear local storage and JS variables
-        localStorage.removeItem('currentCode');
-        localStorage.removeItem('currentDocId');
-        currentCode = '';
-        currentDocId = '';
-
-        // Re-render the queue so it’s updated
-        renderQueueList();
-      } catch (error) {
-        console.error('Error uploading photos:', error);
-        alert('Error uploading photos: ' + error.message);
-      }
-    } else {
+    if (uploadInput.files.length === 0 || unconfirmedRefs.length === 0) {
       alert('Please select photos to upload.');
+      return;
     }
+
+    try {
+      alert('Photos uploaded for code: ' + currentCode);
+
+      // Remove from queue
+      if (currentDocId) {
+        await removeFromQueue(currentDocId);
+      }
+
+      // Clear UI
+      resetUploadState();
+
+      // Re-render the queue (it’s been updated)
+      renderQueueList();
+
+    } catch (error) {
+      console.error('Error finalizing photos:', error);
+      alert('Error finalizing photos: ' + error.message);
+    }
+  });
+
+  /**
+   * If user presses "Cancel", remove any uploaded images from storage, but keep them in queue.
+   */
+  document.getElementById('cancelBtn').addEventListener('click', async () => {
+    try {
+      await deleteUnconfirmedUploads();
+    } catch (error) {
+      console.error('Error canceling uploads:', error);
+    }
+    // Reset the UI (but do NOT remove from queue)
+    resetUploadState();
+    alert('Upload canceled. Images removed.');
   });
 
   /**
@@ -290,14 +363,62 @@
     localStorage.removeItem('currentCode');
     localStorage.removeItem('currentDocId');
 
+    // Reset the UI
+    resetUploadState();
+    // Re-render the queue
+    renderQueueList();
+  });
+
+  /**
+   * Delete all unconfirmed uploads (from storage) if user cancels or navigates away.
+   */
+  async function deleteUnconfirmedUploads() {
+    const deletionPromises = [];
+    // For each ref, call .delete()
+    for (let ref of unconfirmedRefs) {
+      try {
+        deletionPromises.push(ref.delete());
+      } catch (error) {
+        console.error('Error scheduling file for deletion:', error);
+      }
+    }
+    await Promise.all(deletionPromises);
+    unconfirmedRefs = [];
+  }
+
+  /**
+   * Reset the UI / variables after either completing or canceling uploads.
+   */
+  function resetUploadState() {
     // Hide assigned code UI
     document.getElementById('assignedCode').classList.add('hidden');
     document.getElementById('upload').classList.add('hidden');
     document.getElementById('uploadBtn').classList.add('hidden');
+    document.getElementById('cancelBtn').classList.add('hidden');
+
+    // Clear file input
     document.getElementById('upload').value = '';
 
-    // Re-render the queue
-    renderQueueList();
+    // Clear local storage and JS variables for code
+    localStorage.removeItem('currentCode');
+    localStorage.removeItem('currentDocId');
+    currentCode = '';
+    currentDocId = '';
+
+    // Also reset unconfirmed uploads in memory
+    unconfirmedRefs = [];
+    haveUploadsStarted = false;
+  }
+
+  /**
+   * On page unload, if we started background uploads but never confirmed them,
+   * delete them to clean up.
+   */
+  window.addEventListener('beforeunload', async (event) => {
+    if (haveUploadsStarted && unconfirmedRefs.length > 0) {
+      // We do an async clean-up. Some browsers may not wait, but we'll try.
+      await deleteUnconfirmedUploads();
+    }
   });
 
   // On page load, restore the code from localStorage if it exists
