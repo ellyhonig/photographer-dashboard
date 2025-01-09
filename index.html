@@ -125,17 +125,6 @@
   let haveUploadsStarted = false; // whether we started any background upload
 
   /**
-   * Grab the entire queue (ordered by timestamp).
-   */
-  async function getQueue() {
-    const querySnapshot = await db.collection("queue").orderBy("timestamp").get();
-    return querySnapshot.docs.map((doc) => ({
-      id: doc.id,
-      code: doc.data().code
-    }));
-  }
-
-  /**
    * Remove a specific document from the queue by ID.
    */
   async function removeFromQueue(id) {
@@ -155,69 +144,81 @@
   }
 
   /**
-   * Render the queue list on the page.
-   * Clicking/tapping any code in the list sets that code as the currently assigned code
-   * and highlights that selection.
+   * Real-time listener for queue changes:
+   * - Re-renders the queue whenever a doc is added/removed/updated.
    */
-  async function renderQueueList() {
-    const queueList = document.getElementById('queueList');
-    queueList.innerHTML = ''; // Clear any existing items
+  function startQueueListener() {
+    db.collection("queue").orderBy("timestamp").onSnapshot(
+      (snapshot) => {
+        const queueList = document.getElementById('queueList');
+        queueList.innerHTML = ''; // Clear old items
 
-    const queue = await getQueue();
-    queue.forEach((item) => {
-      const li = document.createElement('li');
-      li.classList.add('list-group-item');
-      li.textContent = item.code;
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          const li = document.createElement('li');
+          li.classList.add('list-group-item');
+          li.textContent = data.code;
 
-      // Highlight if it's the currently selected code
-      if (item.code === currentCode) {
-        li.classList.add('active');
+          // Highlight if it's the currently selected code
+          if (data.code === currentCode) {
+            li.classList.add('active');
+          }
+
+          // On clicking a code, assign that code
+          li.addEventListener('click', () => {
+            const allItems = document.querySelectorAll('.list-group-item');
+            allItems.forEach((el) => el.classList.remove('active'));
+
+            li.classList.add('active');
+            currentCode = data.code;
+            currentDocId = doc.id;
+            localStorage.setItem('currentCode', currentCode);
+            localStorage.setItem('currentDocId', currentDocId);
+            setupUIWithCurrentCode();
+          });
+
+          queueList.appendChild(li);
+        });
+      },
+      (error) => {
+        console.error('Error listening for queue updates:', error);
       }
-
-      // On clicking a code in the list, assign that code
-      li.addEventListener('click', () => {
-        // Remove 'active' from all items
-        const allItems = document.querySelectorAll('.list-group-item');
-        allItems.forEach((el) => el.classList.remove('active'));
-
-        // Make this item active
-        li.classList.add('active');
-
-        currentCode = item.code;
-        currentDocId = item.id;
-        localStorage.setItem('currentCode', currentCode);
-        localStorage.setItem('currentDocId', currentDocId);
-        setupUIWithCurrentCode();
-      });
-
-      queueList.appendChild(li);
-    });
+    );
   }
 
   /**
    * "Get Next Code" button:
-   * - Grabs the first doc from the queue (does NOT remove it).
+   * - Grabs the first doc from the queue (ordered by timestamp), does NOT remove it.
+   * - This is a one-time query, the real-time listener will take care of updating the UI.
    */
   document.getElementById('availableBtn').addEventListener('click', async () => {
-    const queue = await getQueue();
-    if (queue.length > 0) {
-      const firstInQueue = queue[0];
+    try {
+      const firstDocSnapshot = await db.collection("queue")
+        .orderBy("timestamp")
+        .limit(1)
+        .get();
 
-      // Remove 'active' from all existing items first
-      const allItems = document.querySelectorAll('.list-group-item');
-      allItems.forEach((el) => el.classList.remove('active'));
+      if (!firstDocSnapshot.empty) {
+        const doc = firstDocSnapshot.docs[0];
+        const data = doc.data();
 
-      // Set current code
-      currentCode = firstInQueue.code;
-      currentDocId = firstInQueue.id;
-      localStorage.setItem('currentCode', currentCode);
-      localStorage.setItem('currentDocId', currentDocId);
-      setupUIWithCurrentCode();
+        // Remove 'active' highlight from all existing items
+        const allItems = document.querySelectorAll('.list-group-item');
+        allItems.forEach((el) => el.classList.remove('active'));
 
-      // Re-render to highlight it
-      await renderQueueList();
-    } else {
-      alert('No one in the queue.');
+        // Set current code
+        currentCode = data.code;
+        currentDocId = doc.id;
+        localStorage.setItem('currentCode', currentCode);
+        localStorage.setItem('currentDocId', currentDocId);
+        setupUIWithCurrentCode();
+
+        // The real-time listener will handle highlighting in the list
+      } else {
+        alert('No one in the queue.');
+      }
+    } catch (err) {
+      console.error('Error fetching the first doc:', err);
     }
   });
 
@@ -317,9 +318,6 @@
       // Clear UI
       resetUploadState();
 
-      // Re-render the queue (it’s been updated)
-      renderQueueList();
-
     } catch (error) {
       console.error('Error finalizing photos:', error);
       alert('Error finalizing photos: ' + error.message);
@@ -327,7 +325,7 @@
   });
 
   /**
-   * If user presses "Cancel", remove any uploaded images from storage, but keep them in queue.
+   * If user presses "Cancel", remove any uploaded images from storage, but keep the code in queue.
    */
   document.getElementById('cancelBtn').addEventListener('click', async () => {
     try {
@@ -365,8 +363,6 @@
 
     // Reset the UI
     resetUploadState();
-    // Re-render the queue
-    renderQueueList();
   });
 
   /**
@@ -421,15 +417,18 @@
     }
   });
 
-  // On page load, restore the code from localStorage if it exists
-  // Then render the queue list
+  // On page load, restore the code from localStorage if it exists,
+  // set up real-time queue listener, etc.
   window.onload = function() {
     currentCode = localStorage.getItem('currentCode') || '';
     currentDocId = localStorage.getItem('currentDocId') || '';
+
     if (currentCode) {
       setupUIWithCurrentCode();
     }
-    renderQueueList();
+
+    // Start listening for queue changes in real-time
+    startQueueListener();
   };
 </script>
 </body>
