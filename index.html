@@ -45,6 +45,24 @@
       background-color: #007bff;
       color: #fff;
     }
+    /* Larger text for the "Tap on a code..." instruction */
+    .tap-instruction {
+      font-size: 1.25rem;
+      font-weight: 500;
+      margin-top: 15px;
+    }
+    /* Example styling for online/offline badge */
+    .online-badge {
+      font-weight: bold;
+      margin-left: 10px;
+    }
+    .online {
+      color: green;
+    }
+    .offline {
+      color: red;
+    }
+
     @media (max-width: 576px) {
       h1 {
         font-size: 1.5rem;
@@ -63,11 +81,42 @@
 <body>
 <div class="container">
   <h1 class="text-center">Photographer Dashboard</h1>
-  <p class="text-center"><em>Tap on a code to upload images for it</em></p>
 
-  <!-- BUTTONS ROW -->
+  <!--
+    // ------------------------------------------------------------
+    // --- NEW OR MODIFIED: "Online Status" + "Go Online" Button
+    // ------------------------------------------------------------
+  -->
   <div class="text-center mt-4">
-    <button id="availableBtn" class="btn btn-primary mb-3">Get Next Code</button>
+    <span>Photographer Status:
+      <span id="onlineBadge" class="online-badge offline">(Offline)</span>
+    </span>
+    <button id="goOnlineBtn" class="btn btn-primary ml-3">Go Online</button>
+  </div>
+
+  <!--
+    // ------------------------------------------------------------
+    // --- End "Go Online" Section
+    // ------------------------------------------------------------
+  -->
+
+  <!--
+    // ------------------------------------------------------------
+    // Make the instruction bigger
+    // ------------------------------------------------------------
+  -->
+  <p class="tap-instruction text-center">
+    Tap on a code to upload images for it
+  </p>
+
+  <!--
+    // ------------------------------------------------------------
+    // We remove the "Get Next Code" button
+    // and keep "Remove Currently Selected"
+    // ------------------------------------------------------------
+  -->
+  <div class="text-center mt-2">
+    <!-- Removed the availableBtn -->
     <button id="removeCurrentBtn" class="btn btn-danger mb-3">
       Remove Currently Selected
     </button>
@@ -78,7 +127,7 @@
     Assigned Code: <strong id="queueCode"></strong>
   </p>
 
-  <!-- UPLOAD SECTION -->
+  <!-- UPLOAD SECTION (Paid Photos) -->
   <div class="text-center">
     <input
       type="file"
@@ -93,14 +142,6 @@
     <button id="cancelBtn" class="hidden btn btn-secondary mt-3">
       Cancel
     </button>
-  </div>
-
-  <!-- SHARE LOCATION -->
-  <div class="text-center mt-4">
-    <button id="shareLocationBtn" class="btn btn-info">
-      Share My Location
-    </button>
-    <p id="locStatus" class="mt-2" style="font-style: italic;"></p>
   </div>
 
   <!-- QUEUE LIST CARD -->
@@ -142,12 +183,13 @@
   let unconfirmedRefs = [];
   let haveUploadsStarted = false;
 
-  // We'll store a reference to the location doc if the photographer shares location
-  let photographerLocDocId = '';
+  // We'll store an ID for the "photographerStatus" doc if we create one
+  let photographerStatusDocId = '';
+  let locationPhotoFile = null; // We'll store the "where I am" photo here
 
-  /**
-   * Real-time queue listener
-   */
+  // ------------------------------------------------------------
+  //  Start the queue listener
+  // ------------------------------------------------------------
   function startQueueListener() {
     db.collection("queue").orderBy("timestamp").onSnapshot((snapshot) => {
       const queueList = document.getElementById('queueList');
@@ -177,10 +219,12 @@
         li.appendChild(codeSpan);
         li.appendChild(phoneSpan);
 
+        // Highlight if currently active
         if (data.code === currentCode) {
           li.classList.add('active');
         }
 
+        // On-click: set as the active code
         li.addEventListener('click', () => {
           const allItems = document.querySelectorAll('.list-group-item');
           allItems.forEach(el => el.classList.remove('active'));
@@ -196,7 +240,7 @@
         queueList.appendChild(li);
       });
 
-      // If no current code, auto-select first doc
+      // If no current code, auto-select the first doc
       if (!currentCode && snapshot.docs.length > 0) {
         const firstDoc = snapshot.docs[0];
         currentCode = firstDoc.data().code;
@@ -205,7 +249,6 @@
         localStorage.setItem('currentDocId', currentDocId);
         setupUIWithCurrentCode();
 
-        // Highlight first item
         const firstLi = document.querySelector('.list-group-item');
         if (firstLi) firstLi.classList.add('active');
       }
@@ -214,6 +257,7 @@
     });
   }
 
+  // Update UI with current code
   function setupUIWithCurrentCode() {
     if (currentCode) {
       document.getElementById('queueCode').textContent = currentCode;
@@ -223,25 +267,9 @@
     }
   }
 
-  document.getElementById('availableBtn').addEventListener('click', async () => {
-    const firstDocSnap = await db.collection("queue").orderBy("timestamp").limit(1).get();
-    if (!firstDocSnap.empty) {
-      const doc = firstDocSnap.docs[0];
-      const data = doc.data();
-
-      const allItems = document.querySelectorAll('.list-group-item');
-      allItems.forEach(el => el.classList.remove('active'));
-
-      currentCode = data.code;
-      currentDocId = doc.id;
-      localStorage.setItem('currentCode', currentCode);
-      localStorage.setItem('currentDocId', currentDocId);
-      setupUIWithCurrentCode();
-    } else {
-      alert('No one in the queue.');
-    }
-  });
-
+  // ------------------------------------------------------------
+  //  Listen for file selection (Paid Photos)
+  // ------------------------------------------------------------
   document.getElementById('upload').addEventListener('change', async (e) => {
     if (!currentCode) {
       alert('Please select or retrieve a code first.');
@@ -249,6 +277,7 @@
       return;
     }
 
+    // If we had unconfirmed uploads from before, delete them
     if (unconfirmedRefs.length > 0) {
       await deleteUnconfirmedUploads();
     }
@@ -285,6 +314,9 @@
     }
   });
 
+  // ------------------------------------------------------------
+  //  Finalize Photo Upload
+  // ------------------------------------------------------------
   document.getElementById('uploadBtn').addEventListener('click', async () => {
     if (!currentCode) {
       alert("No code assigned.");
@@ -308,6 +340,9 @@
     }
   });
 
+  // ------------------------------------------------------------
+  //  Cancel Photo Upload
+  // ------------------------------------------------------------
   document.getElementById('cancelBtn').addEventListener('click', async () => {
     try {
       await deleteUnconfirmedUploads();
@@ -318,6 +353,9 @@
     alert("Upload canceled and images removed.");
   });
 
+  // ------------------------------------------------------------
+  //  Remove Current Code
+  // ------------------------------------------------------------
   document.getElementById('removeCurrentBtn').addEventListener('click', async () => {
     if (!currentDocId) {
       alert("No code selected.");
@@ -337,6 +375,7 @@
     }
   });
 
+  // Delete unconfirmed uploads (photos that are not yet finalized)
   async function deleteUnconfirmedUploads() {
     const deletes = [];
     for (const ref of unconfirmedRefs) {
@@ -346,12 +385,14 @@
     unconfirmedRefs = [];
   }
 
+  // Reset the UI after finalizing or canceling
   function resetUploadState() {
     document.getElementById('assignedCode').classList.add('hidden');
     document.getElementById('upload').classList.add('hidden');
     document.getElementById('uploadBtn').classList.add('hidden');
     document.getElementById('cancelBtn').classList.add('hidden');
     document.getElementById('upload').value = '';
+
     localStorage.removeItem('currentCode');
     localStorage.removeItem('currentDocId');
     currentCode = '';
@@ -360,43 +401,147 @@
     haveUploadsStarted = false;
   }
 
+  // If user leaves mid-upload, remove unconfirmed
   window.addEventListener('beforeunload', async () => {
     if (haveUploadsStarted && unconfirmedRefs.length > 0) {
       await deleteUnconfirmedUploads();
     }
   });
 
-  // LOCATION SHARING
-  document.getElementById('shareLocationBtn').addEventListener('click', async () => {
-    // Let the user share their location if they want
-    if (!navigator.geolocation) {
-      document.getElementById('locStatus').textContent = "Geolocation not supported.";
-      return;
-    }
-    document.getElementById('locStatus').textContent = "Requesting location...";
+  // ------------------------------------------------------------
+  //  "Go Online" Flow
+  // ------------------------------------------------------------
+  const goOnlineBtn = document.getElementById('goOnlineBtn');
+  const onlineBadge = document.getElementById('onlineBadge');
 
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-      const lat = pos.coords.latitude;
-      const lng = pos.coords.longitude;
+  goOnlineBtn.addEventListener('click', async () => {
+    try {
+      // 1) Get location
+      const { lat, lng } = await requestGeolocation();
+      // 2) Prompt for location photo + message
+      const { photoFile, message } = await promptLocationPhotoAndMessage();
 
-      document.getElementById('locStatus').textContent = 
-        `Location shared! (lat: ${lat.toFixed(5)}, lng: ${lng.toFixed(5)})`;
+      // 3) Upload the location photo
+      let photoURL = '';
+      if (photoFile) {
+        const fileName = Date.now() + "_" + photoFile.name;
+        const ref = storage.ref(`wherePhotos/onlineStatus/${fileName}`);
+        await ref.put(photoFile);
+        photoURL = await ref.getDownloadURL();
+      }
 
-      // For simplicity, we create a new doc in 'photographerLocations'. 
-      // You might store a "photographerId" in localStorage if needed.
-      const docRef = await db.collection("photographerLocations").add({
+      // 4) Write to "photographerStatus" collection
+      const docRef = await db.collection("photographerStatus").add({
         lat: lat,
         lng: lng,
-        updatedAt: Date.now()
+        message: message,
+        photoURL: photoURL,
+        lastUpdated: Date.now()
       });
-      photographerLocDocId = docRef.id;
-    }, (err) => {
-      document.getElementById('locStatus').textContent = 
-        "Permission denied or error retrieving location.";
-      console.error(err);
-    });
+      photographerStatusDocId = docRef.id;
+
+      // 5) Indicate "Online" in the UI
+      updateOnlineBadge(true);
+      alert("You are now online!");
+    } catch (err) {
+      console.error("Go online flow failed:", err);
+      alert("Could not go online: " + err.message);
+    }
   });
 
+  // helper function to get geolocation
+  async function requestGeolocation() {
+    if (!navigator.geolocation) {
+      throw new Error("Geolocation not supported by your browser.");
+    }
+    return new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          resolve({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude
+          });
+        },
+        (err) => {
+          reject(err);
+        }
+      );
+    });
+  }
+
+  // helper function to open a basic prompt for photo & message
+  async function promptLocationPhotoAndMessage() {
+    return new Promise((resolve) => {
+      // We'll do a simple approach: use "window.prompt" for the message 
+      // and an <input> for the photo in a custom flow.
+
+      // 1) Prompt for message
+      const message = window.prompt("Enter a note about where you are:");
+
+      // 2) Prompt for photo
+      const photoInput = document.createElement('input');
+      photoInput.type = 'file';
+      photoInput.accept = 'image/*';
+
+      photoInput.addEventListener('change', (evt) => {
+        const files = evt.target.files;
+        if (files && files.length > 0) {
+          resolve({ photoFile: files[0], message: message || '' });
+        } else {
+          resolve({ photoFile: null, message: message || '' });
+        }
+      });
+
+      // simulate clicking the hidden input
+      photoInput.click();
+    });
+  }
+
+  // updates the online/offline badge in the DOM
+  function updateOnlineBadge(isOnline) {
+    if (isOnline) {
+      onlineBadge.textContent = "(Online)";
+      onlineBadge.classList.remove('offline');
+      onlineBadge.classList.add('online');
+    } else {
+      onlineBadge.textContent = "(Offline)";
+      onlineBadge.classList.remove('online');
+      onlineBadge.classList.add('offline');
+    }
+  }
+
+  // ------------------------------------------------------------
+  //  Periodic check of Online Status (lastUpdated < 30 min)
+  // ------------------------------------------------------------
+  setInterval(async () => {
+    // if we haven't created a status doc, skip
+    if (!photographerStatusDocId) return;
+
+    try {
+      const docSnap = await db.collection("photographerStatus")
+                              .doc(photographerStatusDocId)
+                              .get();
+      if (docSnap.exists) {
+        const data = docSnap.data();
+        const lastUpdated = data.lastUpdated || 0;
+        const now = Date.now();
+        const diffMins = (now - lastUpdated) / 1000 / 60;
+
+        if (diffMins < 30) {
+          // still considered "online"
+          updateOnlineBadge(true);
+        } else {
+          updateOnlineBadge(false);
+        }
+      }
+    } catch (err) {
+      console.error("Error checking online status:", err);
+    }
+  }, 60 * 1000); // check every minute
+
+  // ------------------------------------------------------------
+  //  On page load
+  // ------------------------------------------------------------
   window.onload = () => {
     currentCode = localStorage.getItem('currentCode') || '';
     currentDocId = localStorage.getItem('currentDocId') || '';
