@@ -45,7 +45,7 @@
       background-color: #007bff;
       color: #fff;
     }
-    /* Larger text for the "Tap on a code..." instruction */
+    /* Larger text for "Tap on a code..." instruction */
     .tap-instruction {
       font-size: 1.25rem;
       font-weight: 500;
@@ -54,7 +54,7 @@
     /* Example styling for online/offline badge */
     .online-badge {
       font-weight: bold;
-      margin-left: 10px;
+      margin-left: 5px;
     }
     .online {
       color: green;
@@ -62,14 +62,25 @@
     .offline {
       color: red;
     }
-
+    /* Make sure images scale nicely on mobile */
+    img.responsive-img {
+      max-width: 100%;
+      height: auto;
+      margin-top: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    /* Card spacing for mobile */
+    .card {
+      margin-bottom: 1rem;
+    }
     @media (max-width: 576px) {
       h1 {
         font-size: 1.5rem;
       }
       .container {
         margin-top: 20px;
-        max-width: 90%;
+        max-width: 95%;
       }
       .list-group-item {
         flex-direction: column;
@@ -82,47 +93,71 @@
 <div class="container">
   <h1 class="text-center">Photographer Dashboard</h1>
 
-  <!--
+  <!-- 
     // ------------------------------------------------------------
-    // --- NEW OR MODIFIED: "Online Status" + "Go Online" Button
+    // --- NEW OR MODIFIED: "Online Status" Card
     // ------------------------------------------------------------
   -->
-  <div class="text-center mt-4">
-    <span>Photographer Status:
-      <span id="onlineBadge" class="online-badge offline">(Offline)</span>
-    </span>
-    <button id="goOnlineBtn" class="btn btn-primary ml-3">Go Online</button>
+  <div class="card mt-4" id="onlineStatusCard">
+    <div class="card-header">Online Status</div>
+    <div class="card-body text-center">
+      <!-- 1) Badge showing online/offline -->
+      <p>
+        Current Status:
+        <span id="onlineBadge" class="online-badge offline">(Offline)</span>
+      </p>
+
+      <!-- 2) If offline, show "Go Online" button; if online, show "Go Offline" -->
+      <button id="goOnlineBtn" class="btn btn-primary">Go Online</button>
+      <button id="goOfflineBtn" class="btn btn-secondary hidden">Go Offline</button>
+
+      <!-- 3) "Form" to pick a photo & enter a message, only visible after clicking "Go Online" -->
+      <div id="onlineForm" class="hidden mt-3">
+        <input 
+          type="file" 
+          id="onlinePhotoInput" 
+          accept="image/*" 
+          class="form-control-file"
+        />
+        <textarea
+          id="onlineMessageInput"
+          class="form-control mt-2"
+          rows="2"
+          placeholder="Describe where you are..."
+        ></textarea>
+        <button id="uploadOnlineBtn" class="btn btn-success mt-2">
+          Upload Status
+        </button>
+      </div>
+
+      <!-- 4) Display area for current message + photo (if online) -->
+      <div id="currentOnlineInfo" class="hidden mt-3">
+        <p id="locationMsgTitle" style="font-weight:600; margin-bottom:5px;">
+          Current Message:
+        </p>
+        <p id="locationMsg" style="margin-bottom:10px;">(none)</p>
+        <img
+          id="locationPhoto"
+          src=""
+          alt="No photo"
+          class="responsive-img hidden"
+        />
+      </div>
+    </div>
   </div>
+  <!-- // --- End of Online Status Card -->
 
-  <!--
-    // ------------------------------------------------------------
-    // --- End "Go Online" Section
-    // ------------------------------------------------------------
-  -->
 
-  <!--
-    // ------------------------------------------------------------
-    // Make the instruction bigger
-    // ------------------------------------------------------------
-  -->
   <p class="tap-instruction text-center">
     Tap on a code to upload images for it
   </p>
 
-  <!--
-    // ------------------------------------------------------------
-    // We remove the "Get Next Code" button
-    // and keep "Remove Currently Selected"
-    // ------------------------------------------------------------
-  -->
   <div class="text-center mt-2">
-    <!-- Removed the availableBtn -->
     <button id="removeCurrentBtn" class="btn btn-danger mb-3">
       Remove Currently Selected
     </button>
   </div>
 
-  <!-- ASSIGNED CODE LABEL -->
   <p id="assignedCode" class="hidden text-center">
     Assigned Code: <strong id="queueCode"></strong>
   </p>
@@ -184,11 +219,24 @@
   let haveUploadsStarted = false;
 
   // We'll store an ID for the "photographerStatus" doc if we create one
-  let photographerStatusDocId = '';
-  let locationPhotoFile = null; // We'll store the "where I am" photo here
+  let photographerStatusDocId = null;
+  // We'll store the last known data from that doc so we can display it
+  let statusData = null;
+
+  // DOM references for online/offline controls
+  const onlineBadge = document.getElementById('onlineBadge');
+  const goOnlineBtn = document.getElementById('goOnlineBtn');
+  const goOfflineBtn = document.getElementById('goOfflineBtn');
+  const onlineForm = document.getElementById('onlineForm');
+  const onlinePhotoInput = document.getElementById('onlinePhotoInput');
+  const onlineMessageInput = document.getElementById('onlineMessageInput');
+  const uploadOnlineBtn = document.getElementById('uploadOnlineBtn');
+  const currentOnlineInfo = document.getElementById('currentOnlineInfo');
+  const locationMsg = document.getElementById('locationMsg');
+  const locationPhoto = document.getElementById('locationPhoto');
 
   // ------------------------------------------------------------
-  //  Start the queue listener
+  //  QUEUE LISTENER
   // ------------------------------------------------------------
   function startQueueListener() {
     db.collection("queue").orderBy("timestamp").onSnapshot((snapshot) => {
@@ -219,12 +267,10 @@
         li.appendChild(codeSpan);
         li.appendChild(phoneSpan);
 
-        // Highlight if currently active
         if (data.code === currentCode) {
           li.classList.add('active');
         }
 
-        // On-click: set as the active code
         li.addEventListener('click', () => {
           const allItems = document.querySelectorAll('.list-group-item');
           allItems.forEach(el => el.classList.remove('active'));
@@ -240,7 +286,7 @@
         queueList.appendChild(li);
       });
 
-      // If no current code, auto-select the first doc
+      // If no current code, auto-select first doc
       if (!currentCode && snapshot.docs.length > 0) {
         const firstDoc = snapshot.docs[0];
         currentCode = firstDoc.data().code;
@@ -249,6 +295,7 @@
         localStorage.setItem('currentDocId', currentDocId);
         setupUIWithCurrentCode();
 
+        // Highlight first item
         const firstLi = document.querySelector('.list-group-item');
         if (firstLi) firstLi.classList.add('active');
       }
@@ -257,7 +304,6 @@
     });
   }
 
-  // Update UI with current code
   function setupUIWithCurrentCode() {
     if (currentCode) {
       document.getElementById('queueCode').textContent = currentCode;
@@ -268,7 +314,7 @@
   }
 
   // ------------------------------------------------------------
-  //  Listen for file selection (Paid Photos)
+  //  PAID PHOTO UPLOAD (MAIN)
   // ------------------------------------------------------------
   document.getElementById('upload').addEventListener('change', async (e) => {
     if (!currentCode) {
@@ -277,7 +323,6 @@
       return;
     }
 
-    // If we had unconfirmed uploads from before, delete them
     if (unconfirmedRefs.length > 0) {
       await deleteUnconfirmedUploads();
     }
@@ -314,9 +359,6 @@
     }
   });
 
-  // ------------------------------------------------------------
-  //  Finalize Photo Upload
-  // ------------------------------------------------------------
   document.getElementById('uploadBtn').addEventListener('click', async () => {
     if (!currentCode) {
       alert("No code assigned.");
@@ -340,9 +382,6 @@
     }
   });
 
-  // ------------------------------------------------------------
-  //  Cancel Photo Upload
-  // ------------------------------------------------------------
   document.getElementById('cancelBtn').addEventListener('click', async () => {
     try {
       await deleteUnconfirmedUploads();
@@ -353,9 +392,6 @@
     alert("Upload canceled and images removed.");
   });
 
-  // ------------------------------------------------------------
-  //  Remove Current Code
-  // ------------------------------------------------------------
   document.getElementById('removeCurrentBtn').addEventListener('click', async () => {
     if (!currentDocId) {
       alert("No code selected.");
@@ -375,7 +411,6 @@
     }
   });
 
-  // Delete unconfirmed uploads (photos that are not yet finalized)
   async function deleteUnconfirmedUploads() {
     const deletes = [];
     for (const ref of unconfirmedRefs) {
@@ -385,7 +420,6 @@
     unconfirmedRefs = [];
   }
 
-  // Reset the UI after finalizing or canceling
   function resetUploadState() {
     document.getElementById('assignedCode').classList.add('hidden');
     document.getElementById('upload').classList.add('hidden');
@@ -401,7 +435,6 @@
     haveUploadsStarted = false;
   }
 
-  // If user leaves mid-upload, remove unconfirmed
   window.addEventListener('beforeunload', async () => {
     if (haveUploadsStarted && unconfirmedRefs.length > 0) {
       await deleteUnconfirmedUploads();
@@ -409,47 +442,108 @@
   });
 
   // ------------------------------------------------------------
-  //  "Go Online" Flow
+  //  GO ONLINE / GO OFFLINE Logic
   // ------------------------------------------------------------
-  const goOnlineBtn = document.getElementById('goOnlineBtn');
-  const onlineBadge = document.getElementById('onlineBadge');
-
   goOnlineBtn.addEventListener('click', async () => {
     try {
-      // 1) Get location
+      // 1) Request geolocation first
       const { lat, lng } = await requestGeolocation();
-      // 2) Prompt for location photo + message
-      const { photoFile, message } = await promptLocationPhotoAndMessage();
 
-      // 3) Upload the location photo
-      let photoURL = '';
-      if (photoFile) {
+      // 2) Reveal the "onlineForm" so they can pick photo + message
+      onlineForm.classList.remove('hidden');
+
+      // Save lat/lng in memory (statusData), so we can store it later
+      statusData = { lat, lng, message: '', photoURL: '', lastUpdated: Date.now() };
+
+    } catch (err) {
+      console.error("Error going online:", err);
+      alert("Could not retrieve location: " + err.message);
+    }
+  });
+
+  uploadOnlineBtn.addEventListener('click', async () => {
+    if (!statusData) {
+      alert("No location data. Please click 'Go Online' again.");
+      return;
+    }
+
+    // 1) Read the user’s message
+    const msg = onlineMessageInput.value.trim();
+    // 2) If they picked a photo, upload it
+    const files = onlinePhotoInput.files;
+    let photoURL = '';
+    if (files && files.length > 0) {
+      try {
+        const photoFile = files[0];
         const fileName = Date.now() + "_" + photoFile.name;
         const ref = storage.ref(`wherePhotos/onlineStatus/${fileName}`);
         await ref.put(photoFile);
         photoURL = await ref.getDownloadURL();
+      } catch (err) {
+        console.error("Error uploading location photo:", err);
+        alert("Could not upload photo: " + err.message);
+        return;
+      }
+    }
+
+    // 3) Write or update doc in Firestore
+    statusData.message = msg;
+    statusData.photoURL = photoURL || '';
+    statusData.lastUpdated = Date.now();
+
+    try {
+      // If we don't already have a doc, create one
+      if (!photographerStatusDocId) {
+        const docRef = await db.collection("photographerStatus").add(statusData);
+        photographerStatusDocId = docRef.id;
+      } else {
+        // or update existing doc
+        await db.collection("photographerStatus").doc(photographerStatusDocId).set(statusData);
       }
 
-      // 4) Write to "photographerStatus" collection
-      const docRef = await db.collection("photographerStatus").add({
-        lat: lat,
-        lng: lng,
-        message: message,
-        photoURL: photoURL,
-        lastUpdated: Date.now()
-      });
-      photographerStatusDocId = docRef.id;
-
-      // 5) Indicate "Online" in the UI
+      // 4) UI: Hide the form and mark "Online"
+      onlineForm.classList.add('hidden');
       updateOnlineBadge(true);
+
+      // 5) Show the current message + photo
+      displayCurrentOnlineInfo();
+
+      // Also toggle offline button
+      goOnlineBtn.classList.add('hidden');
+      goOfflineBtn.classList.remove('hidden');
+
       alert("You are now online!");
     } catch (err) {
-      console.error("Go online flow failed:", err);
-      alert("Could not go online: " + err.message);
+      console.error("Error saving status doc:", err);
+      alert("Error saving your online status: " + err.message);
     }
   });
 
-  // helper function to get geolocation
+  // “Go Offline” button
+  goOfflineBtn.addEventListener('click', async () => {
+    try {
+      // optional: remove doc from Firestore or just set a lastUpdated to old date
+      if (photographerStatusDocId) {
+        await db.collection("photographerStatus").doc(photographerStatusDocId).delete();
+        photographerStatusDocId = null;
+      }
+      // reset local memory
+      statusData = null;
+
+      // UI changes
+      updateOnlineBadge(false);
+      goOnlineBtn.classList.remove('hidden');
+      goOfflineBtn.classList.add('hidden');
+      hideCurrentOnlineInfo();
+
+      alert("You are now offline.");
+    } catch (err) {
+      console.error("Error going offline:", err);
+      alert("Could not go offline: " + err.message);
+    }
+  });
+
+  // Function to request geolocation
   async function requestGeolocation() {
     if (!navigator.geolocation) {
       throw new Error("Geolocation not supported by your browser.");
@@ -469,34 +563,6 @@
     });
   }
 
-  // helper function to open a basic prompt for photo & message
-  async function promptLocationPhotoAndMessage() {
-    return new Promise((resolve) => {
-      // We'll do a simple approach: use "window.prompt" for the message 
-      // and an <input> for the photo in a custom flow.
-
-      // 1) Prompt for message
-      const message = window.prompt("Enter a note about where you are:");
-
-      // 2) Prompt for photo
-      const photoInput = document.createElement('input');
-      photoInput.type = 'file';
-      photoInput.accept = 'image/*';
-
-      photoInput.addEventListener('change', (evt) => {
-        const files = evt.target.files;
-        if (files && files.length > 0) {
-          resolve({ photoFile: files[0], message: message || '' });
-        } else {
-          resolve({ photoFile: null, message: message || '' });
-        }
-      });
-
-      // simulate clicking the hidden input
-      photoInput.click();
-    });
-  }
-
   // updates the online/offline badge in the DOM
   function updateOnlineBadge(isOnline) {
     if (isOnline) {
@@ -510,37 +576,81 @@
     }
   }
 
+  // display the currently stored message + photo in the card
+  function displayCurrentOnlineInfo() {
+    if (!statusData) return;
+    currentOnlineInfo.classList.remove('hidden');
+
+    // show message
+    locationMsg.textContent = statusData.message || '(none)';
+
+    // show photo if we have a URL
+    if (statusData.photoURL) {
+      locationPhoto.src = statusData.photoURL;
+      locationPhoto.classList.remove('hidden');
+    } else {
+      locationPhoto.classList.add('hidden');
+    }
+  }
+
+  // hide the displayed message + photo
+  function hideCurrentOnlineInfo() {
+    currentOnlineInfo.classList.add('hidden');
+    locationMsg.textContent = '';
+    locationPhoto.src = '';
+    locationPhoto.classList.add('hidden');
+    // also clear the form fields
+    onlinePhotoInput.value = '';
+    onlineMessageInput.value = '';
+  }
+
   // ------------------------------------------------------------
   //  Periodic check of Online Status (lastUpdated < 30 min)
   // ------------------------------------------------------------
   setInterval(async () => {
-    // if we haven't created a status doc, skip
-    if (!photographerStatusDocId) return;
-
+    if (!photographerStatusDocId) {
+      updateOnlineBadge(false);
+      return;
+    }
     try {
       const docSnap = await db.collection("photographerStatus")
                               .doc(photographerStatusDocId)
                               .get();
-      if (docSnap.exists) {
-        const data = docSnap.data();
-        const lastUpdated = data.lastUpdated || 0;
-        const now = Date.now();
-        const diffMins = (now - lastUpdated) / 1000 / 60;
+      if (!docSnap.exists) {
+        // doc might have been deleted externally
+        photographerStatusDocId = null;
+        statusData = null;
+        updateOnlineBadge(false);
+        hideCurrentOnlineInfo();
+        return;
+      }
 
-        if (diffMins < 30) {
-          // still considered "online"
-          updateOnlineBadge(true);
-        } else {
-          updateOnlineBadge(false);
-        }
+      const data = docSnap.data();
+      const now = Date.now();
+      const diffMins = (now - (data.lastUpdated || 0)) / 1000 / 60;
+
+      if (diffMins < 30) {
+        // considered "online"
+        statusData = data; // update local memory
+        updateOnlineBadge(true);
+        displayCurrentOnlineInfo();
+
+        // show "Go Offline" button, hide "Go Online"
+        goOfflineBtn.classList.remove('hidden');
+        goOnlineBtn.classList.add('hidden');
+      } else {
+        // no update in 30 mins => offline
+        updateOnlineBadge(false);
+        goOnlineBtn.classList.remove('hidden');
+        goOfflineBtn.classList.add('hidden');
       }
     } catch (err) {
       console.error("Error checking online status:", err);
     }
-  }, 60 * 1000); // check every minute
+  }, 60 * 1000); // check every 1 minute
 
   // ------------------------------------------------------------
-  //  On page load
+  //  ON LOAD
   // ------------------------------------------------------------
   window.onload = () => {
     currentCode = localStorage.getItem('currentCode') || '';
