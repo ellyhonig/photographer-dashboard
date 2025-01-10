@@ -1,11 +1,10 @@
-<!-- photographer.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <title>Photographer Dashboard</title>
 
-  <!-- Include Bootstrap CSS (CDN) -->
+  <!-- Bootstrap CSS -->
   <link
     rel="stylesheet"
     href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css"
@@ -28,7 +27,7 @@
     .list-group-item {
       cursor: pointer;
       display: flex;
-      justify-content: space-between; /* Separates code & phone visually */
+      justify-content: space-between;
       align-items: center;
     }
     .code-section {
@@ -36,18 +35,16 @@
       margin-right: 10px;
     }
     .phone-section a {
-      color: #007bff; /* Bootstrap primary color */
+      color: #007bff;
       text-decoration: none;
     }
     .phone-section a:hover {
       text-decoration: underline;
     }
-    /* This will highlight the selected code in the queue */
     .list-group-item.active {
       background-color: #007bff;
-      color: #ffffff;
+      color: #fff;
     }
-    /* Mobile adjustments */
     @media (max-width: 576px) {
       h1 {
         font-size: 1.5rem;
@@ -90,13 +87,20 @@
       accept="image/*"
       multiple
     />
-    <!-- Upload & Cancel buttons -->
     <button id="uploadBtn" class="hidden btn btn-success mt-3">
       Upload Photos
     </button>
     <button id="cancelBtn" class="hidden btn btn-secondary mt-3">
       Cancel
     </button>
+  </div>
+
+  <!-- SHARE LOCATION -->
+  <div class="text-center mt-4">
+    <button id="shareLocationBtn" class="btn btn-info">
+      Share My Location
+    </button>
+    <p id="locStatus" class="mt-2" style="font-style: italic;"></p>
   </div>
 
   <!-- QUEUE LIST CARD -->
@@ -118,9 +122,9 @@
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-storage-compat.js"></script>
 
 <script>
-  // Your Firebase configuration details
+  // Firebase config
   const firebaseConfig = {
-    apiKey: "AIzaSyC0VaYgD8YzgTz1V-R4Crv2noMQF0TL-Ww",
+    apiKey: "AIzaSy***********",
     authDomain: "sight-snap.firebaseapp.com",
     projectId: "sight-snap",
     storageBucket: "sight-snap.firebasestorage.app",
@@ -129,114 +133,87 @@
     measurementId: "G-XLDW0L2DMS"
   };
 
-  // Initialize Firebase
   firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
   const storage = firebase.storage();
 
   let currentCode = '';
   let currentDocId = '';
-
-  // We will store references to any images that got uploaded before confirmation.
-  // If user cancels or leaves page, these images get deleted from Storage.
   let unconfirmedRefs = [];
-  let haveUploadsStarted = false; // whether we started any background upload
+  let haveUploadsStarted = false;
+
+  // We'll store a reference to the location doc if the photographer shares location
+  let photographerLocDocId = '';
 
   /**
-   * Real-time listener for queue changes:
-   * - Re-renders the queue whenever a doc is added/removed/updated.
-   * - Displays both code + phoneNumber.
-   * - If no current code is selected, automatically select the first doc in the queue.
+   * Real-time queue listener
    */
   function startQueueListener() {
-    db.collection("queue").orderBy("timestamp").onSnapshot(
-      (snapshot) => {
-        const queueList = document.getElementById('queueList');
-        queueList.innerHTML = ''; // Clear old items
+    db.collection("queue").orderBy("timestamp").onSnapshot((snapshot) => {
+      const queueList = document.getElementById('queueList');
+      queueList.innerHTML = '';
 
-        // We'll store the doc references in an array for a second pass
-        let docArray = [];
-        snapshot.forEach((docSnap) => {
-          docArray.push(docSnap);
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        const li = document.createElement('li');
+        li.classList.add('list-group-item');
+
+        // CODE
+        const codeSpan = document.createElement('span');
+        codeSpan.classList.add('code-section');
+        codeSpan.textContent = data.code;
+
+        // PHONE
+        const phoneSpan = document.createElement('span');
+        phoneSpan.classList.add('phone-section');
+        const phoneLink = document.createElement('a');
+        phoneLink.href = `tel:${data.phoneNumber || ''}`;
+        phoneLink.textContent = data.phoneNumber || '';
+        phoneLink.addEventListener('click', (e) => {
+          e.stopPropagation();
         });
+        phoneSpan.appendChild(phoneLink);
 
-        // Render them in order
-        docArray.forEach((docSnap, index) => {
-          const data = docSnap.data();
-          const li = document.createElement('li');
-          li.classList.add('list-group-item');
+        li.appendChild(codeSpan);
+        li.appendChild(phoneSpan);
 
-          // Code display
-          const codeSpan = document.createElement('span');
-          codeSpan.classList.add('code-section');
-          codeSpan.textContent = data.code; // e.g. "2558"
+        if (data.code === currentCode) {
+          li.classList.add('active');
+        }
 
-          // Phone container
-          const phoneContainer = document.createElement('span');
-          phoneContainer.classList.add('phone-section');
+        li.addEventListener('click', () => {
+          const allItems = document.querySelectorAll('.list-group-item');
+          allItems.forEach(el => el.classList.remove('active'));
 
-          // "tel:" link for the phone number
-          const phoneLink = document.createElement('a');
-          phoneLink.href = `tel:${data.phoneNumber || ''}`;
-          phoneLink.textContent = data.phoneNumber || '';
-          // Stop propagation so tapping the phone link doesn't also select the code
-          phoneLink.addEventListener('click', (e) => {
-            e.stopPropagation();
-          });
-
-          phoneContainer.appendChild(phoneLink);
-
-          // Put them together in the list item
-          li.appendChild(codeSpan);
-          li.appendChild(phoneContainer);
-
-          // If this is the code that's currently assigned, highlight it
-          if (data.code === currentCode) {
-            li.classList.add('active');
-          }
-
-          // On clicking the LI, select that code
-          li.addEventListener('click', () => {
-            // Remove highlight from all items
-            const allItems = document.querySelectorAll('.list-group-item');
-            allItems.forEach((el) => el.classList.remove('active'));
-
-            li.classList.add('active');
-            currentCode = data.code;
-            currentDocId = docSnap.id;
-            localStorage.setItem('currentCode', currentCode);
-            localStorage.setItem('currentDocId', currentDocId);
-            setupUIWithCurrentCode();
-          });
-
-          queueList.appendChild(li);
-        });
-
-        // If no current code is selected, and there's at least 1 doc, auto-select the first
-        if (!currentCode && docArray.length > 0) {
-          const firstDoc = docArray[0];
-          currentCode = firstDoc.data().code;
-          currentDocId = firstDoc.id;
+          li.classList.add('active');
+          currentCode = data.code;
+          currentDocId = docSnap.id;
           localStorage.setItem('currentCode', currentCode);
           localStorage.setItem('currentDocId', currentDocId);
           setupUIWithCurrentCode();
+        });
 
-          // Highlight the first li in the list
-          const firstLi = document.querySelector('.list-group-item');
-          if (firstLi) {
-            firstLi.classList.add('active');
-          }
-        }
-      },
-      (error) => {
-        console.error('Error listening for queue updates:', error);
+        queueList.appendChild(li);
+      });
+
+      // If no current code, auto-select first doc
+      if (!currentCode && snapshot.docs.length > 0) {
+        const firstDoc = snapshot.docs[0];
+        currentCode = firstDoc.data().code;
+        currentDocId = firstDoc.id;
+        localStorage.setItem('currentCode', currentCode);
+        localStorage.setItem('currentDocId', currentDocId);
+        setupUIWithCurrentCode();
+
+        // Highlight first item
+        const firstLi = document.querySelector('.list-group-item');
+        if (firstLi) firstLi.classList.add('active');
       }
-    );
+    }, (error) => {
+      console.error("Queue listener error:", error);
+    });
   }
 
-  /**
-   * Update UI to show the currently assigned code (and reveal upload controls).
-   */
   function setupUIWithCurrentCode() {
     if (currentCode) {
       document.getElementById('queueCode').textContent = currentCode;
@@ -246,229 +223,186 @@
     }
   }
 
-  /**
-   * "Get Next Code" button:
-   * - Grabs the first doc from the queue (ordered by timestamp), does NOT remove it from the queue.
-   * - Real-time listener handles highlighting in the list.
-   */
   document.getElementById('availableBtn').addEventListener('click', async () => {
-    try {
-      const firstDocSnapshot = await db.collection("queue")
-        .orderBy("timestamp")
-        .limit(1)
-        .get();
+    const firstDocSnap = await db.collection("queue").orderBy("timestamp").limit(1).get();
+    if (!firstDocSnap.empty) {
+      const doc = firstDocSnap.docs[0];
+      const data = doc.data();
 
-      if (!firstDocSnapshot.empty) {
-        const doc = firstDocSnapshot.docs[0];
-        const data = doc.data();
+      const allItems = document.querySelectorAll('.list-group-item');
+      allItems.forEach(el => el.classList.remove('active'));
 
-        // Remove highlight from all items
-        const allItems = document.querySelectorAll('.list-group-item');
-        allItems.forEach((el) => el.classList.remove('active'));
-
-        currentCode = data.code;
-        currentDocId = doc.id;
-        localStorage.setItem('currentCode', currentCode);
-        localStorage.setItem('currentDocId', currentDocId);
-        setupUIWithCurrentCode();
-      } else {
-        alert('No one in the queue.');
-      }
-    } catch (err) {
-      console.error('Error fetching the first doc:', err);
+      currentCode = data.code;
+      currentDocId = doc.id;
+      localStorage.setItem('currentCode', currentCode);
+      localStorage.setItem('currentDocId', currentDocId);
+      setupUIWithCurrentCode();
+    } else {
+      alert('No one in the queue.');
     }
   });
 
-  /**
-   * Start background upload as soon as files are selected.
-   */
   document.getElementById('upload').addEventListener('change', async (e) => {
     if (!currentCode) {
       alert('Please select or retrieve a code first.');
-      // Clear selected files if no code is set
       e.target.value = '';
       return;
     }
 
-    // If we had leftover unconfirmed uploads, delete them
     if (unconfirmedRefs.length > 0) {
       await deleteUnconfirmedUploads();
     }
 
     if (e.target.files.length === 0) {
-      // No files selected, hide the Cancel button
       document.getElementById('cancelBtn').classList.add('hidden');
       return;
     }
 
     haveUploadsStarted = true;
-    const files = e.target.files;
-    unconfirmedRefs = []; // reset for new batch
+    unconfirmedRefs = [];
     document.getElementById('cancelBtn').classList.remove('hidden');
 
+    const files = e.target.files;
     try {
       const uploadPromises = [];
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const storageRef = storage.ref(`photos/${currentCode}/${file.name}`);
-        // Start the put operation
-        const uploadTask = storageRef.put(file);
+        const ref = storage.ref(`photos/${currentCode}/${file.name}`);
+        const uploadTask = ref.put(file);
 
         const p = new Promise((resolve, reject) => {
-          uploadTask.on(
-            'state_changed',
-            // progress handler (optional)
-            null,
-            // error handler
-            (error) => reject(error),
-            // completion handler
-            () => {
-              // Store the final ref so we can delete if canceled
-              unconfirmedRefs.push(uploadTask.snapshot.ref);
-              resolve();
-            }
-          );
+          uploadTask.on('state_changed', null, reject, () => {
+            unconfirmedRefs.push(uploadTask.snapshot.ref);
+            resolve();
+          });
         });
         uploadPromises.push(p);
       }
       await Promise.all(uploadPromises);
-
-    } catch (error) {
-      console.error('Background upload error:', error);
-      alert('Error during background upload: ' + error.message);
+    } catch (err) {
+      console.error("Error uploading photos:", err);
+      alert("Error uploading photos: " + err.message);
     }
   });
 
-  /**
-   * If user presses "Upload Photos", finalize and remove from queue.
-   */
   document.getElementById('uploadBtn').addEventListener('click', async () => {
     if (!currentCode) {
-      alert('No code assigned. Please either get the next code or select one from the list.');
+      alert("No code assigned.");
       return;
     }
-
     const uploadInput = document.getElementById('upload');
     if (uploadInput.files.length === 0 || unconfirmedRefs.length === 0) {
-      alert('Please select photos to upload.');
+      alert("Please select photos to upload.");
       return;
     }
 
     try {
-      alert('Photos uploaded for code: ' + currentCode);
-
+      alert("Photos uploaded for code: " + currentCode);
       if (currentDocId) {
-        // Remove from queue
         await db.collection("queue").doc(currentDocId).delete();
       }
-
       resetUploadState();
-
-    } catch (error) {
-      console.error('Error finalizing photos:', error);
-      alert('Error finalizing photos: ' + error.message);
+    } catch (err) {
+      console.error("Error finalizing photos:", err);
+      alert("Error finalizing photos: " + err.message);
     }
   });
 
-  /**
-   * If user presses "Cancel", remove any uploaded images & keep the code in queue.
-   */
   document.getElementById('cancelBtn').addEventListener('click', async () => {
     try {
       await deleteUnconfirmedUploads();
-    } catch (error) {
-      console.error('Error canceling uploads:', error);
+    } catch (err) {
+      console.error("Error canceling uploads:", err);
     }
     resetUploadState();
-    alert('Upload canceled. Images removed.');
+    alert("Upload canceled and images removed.");
   });
 
-  /**
-   * "Remove Currently Selected" button removes the doc from the queue entirely.
-   */
   document.getElementById('removeCurrentBtn').addEventListener('click', async () => {
     if (!currentDocId) {
-      alert('No code is currently selected.');
+      alert("No code selected.");
       return;
     }
     try {
       await db.collection("queue").doc(currentDocId).delete();
-      alert('Removed code: ' + currentCode + ' from the queue.');
+      alert("Removed code: " + currentCode + " from the queue.");
+      currentCode = '';
+      currentDocId = '';
+      localStorage.removeItem('currentCode');
+      localStorage.removeItem('currentDocId');
+      resetUploadState();
     } catch (err) {
-      console.error('Error removing selected code:', err);
-      alert('Error removing selected code: ' + err.message);
+      console.error("Error removing code:", err);
+      alert("Error removing code: " + err.message);
     }
-
-    currentCode = '';
-    currentDocId = '';
-    localStorage.removeItem('currentCode');
-    localStorage.removeItem('currentDocId');
-
-    resetUploadState();
   });
 
-  /**
-   * Delete all unconfirmed uploads (from storage) if user cancels or navigates away.
-   */
   async function deleteUnconfirmedUploads() {
-    const deletionPromises = [];
-    for (let ref of unconfirmedRefs) {
-      try {
-        deletionPromises.push(ref.delete());
-      } catch (error) {
-        console.error('Error scheduling file for deletion:', error);
-      }
+    const deletes = [];
+    for (const ref of unconfirmedRefs) {
+      deletes.push(ref.delete());
     }
-    await Promise.all(deletionPromises);
+    await Promise.all(deletes);
     unconfirmedRefs = [];
   }
 
-  /**
-   * Reset all UI elements & variables.
-   */
   function resetUploadState() {
-    // Hide assigned code UI
     document.getElementById('assignedCode').classList.add('hidden');
     document.getElementById('upload').classList.add('hidden');
     document.getElementById('uploadBtn').classList.add('hidden');
     document.getElementById('cancelBtn').classList.add('hidden');
-
-    // Clear file input
     document.getElementById('upload').value = '';
-
-    // Clear local storage
     localStorage.removeItem('currentCode');
     localStorage.removeItem('currentDocId');
     currentCode = '';
     currentDocId = '';
-
-    // Clear unconfirmed uploads from memory
     unconfirmedRefs = [];
     haveUploadsStarted = false;
   }
 
-  /**
-   * Before leaving the page, if background uploads have started but never confirmed,
-   * delete them to clean up.
-   */
   window.addEventListener('beforeunload', async () => {
     if (haveUploadsStarted && unconfirmedRefs.length > 0) {
       await deleteUnconfirmedUploads();
     }
   });
 
-  // On page load, restore any existing code from localStorage and start real-time listener.
-  // If no code is stored, we will automatically select the first doc in the queue once the snapshot is loaded.
+  // LOCATION SHARING
+  document.getElementById('shareLocationBtn').addEventListener('click', async () => {
+    // Let the user share their location if they want
+    if (!navigator.geolocation) {
+      document.getElementById('locStatus').textContent = "Geolocation not supported.";
+      return;
+    }
+    document.getElementById('locStatus').textContent = "Requesting location...";
+
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+
+      document.getElementById('locStatus').textContent = 
+        `Location shared! (lat: ${lat.toFixed(5)}, lng: ${lng.toFixed(5)})`;
+
+      // For simplicity, we create a new doc in 'photographerLocations'. 
+      // You might store a "photographerId" in localStorage if needed.
+      const docRef = await db.collection("photographerLocations").add({
+        lat: lat,
+        lng: lng,
+        updatedAt: Date.now()
+      });
+      photographerLocDocId = docRef.id;
+    }, (err) => {
+      document.getElementById('locStatus').textContent = 
+        "Permission denied or error retrieving location.";
+      console.error(err);
+    });
+  });
+
   window.onload = () => {
     currentCode = localStorage.getItem('currentCode') || '';
     currentDocId = localStorage.getItem('currentDocId') || '';
-
-    // If a code was stored, set up the UI with that code right away
     if (currentCode) {
       setupUIWithCurrentCode();
     }
-
-    // Start the real-time listener
     startQueueListener();
   };
 </script>
