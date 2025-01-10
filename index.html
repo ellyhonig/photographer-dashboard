@@ -146,6 +146,7 @@
    * Real-time listener for queue changes:
    * - Re-renders the queue whenever a doc is added/removed/updated.
    * - Displays both code + phoneNumber.
+   * - If no current code is selected, automatically select the first doc in the queue.
    */
   function startQueueListener() {
     db.collection("queue").orderBy("timestamp").onSnapshot(
@@ -153,8 +154,15 @@
         const queueList = document.getElementById('queueList');
         queueList.innerHTML = ''; // Clear old items
 
-        snapshot.forEach((doc) => {
-          const data = doc.data();
+        // We'll store the doc references in an array for a second pass
+        let docArray = [];
+        snapshot.forEach((docSnap) => {
+          docArray.push(docSnap);
+        });
+
+        // Render them in order
+        docArray.forEach((docSnap, index) => {
+          const data = docSnap.data();
           const li = document.createElement('li');
           li.classList.add('list-group-item');
 
@@ -169,7 +177,7 @@
 
           // "tel:" link for the phone number
           const phoneLink = document.createElement('a');
-          phoneLink.href = `tel:${data.phoneNumber || ''}`; 
+          phoneLink.href = `tel:${data.phoneNumber || ''}`;
           phoneLink.textContent = data.phoneNumber || '';
           // Stop propagation so tapping the phone link doesn't also select the code
           phoneLink.addEventListener('click', (e) => {
@@ -182,7 +190,7 @@
           li.appendChild(codeSpan);
           li.appendChild(phoneContainer);
 
-          // Highlight if this is the currently assigned code
+          // If this is the code that's currently assigned, highlight it
           if (data.code === currentCode) {
             li.classList.add('active');
           }
@@ -195,7 +203,7 @@
 
             li.classList.add('active');
             currentCode = data.code;
-            currentDocId = doc.id;
+            currentDocId = docSnap.id;
             localStorage.setItem('currentCode', currentCode);
             localStorage.setItem('currentDocId', currentDocId);
             setupUIWithCurrentCode();
@@ -203,6 +211,22 @@
 
           queueList.appendChild(li);
         });
+
+        // If no current code is selected, and there's at least 1 doc, auto-select the first
+        if (!currentCode && docArray.length > 0) {
+          const firstDoc = docArray[0];
+          currentCode = firstDoc.data().code;
+          currentDocId = firstDoc.id;
+          localStorage.setItem('currentCode', currentCode);
+          localStorage.setItem('currentDocId', currentDocId);
+          setupUIWithCurrentCode();
+
+          // Highlight the first li in the list
+          const firstLi = document.querySelector('.list-group-item');
+          if (firstLi) {
+            firstLi.classList.add('active');
+          }
+        }
       },
       (error) => {
         console.error('Error listening for queue updates:', error);
@@ -347,7 +371,7 @@
   });
 
   /**
-   * If user presses "Cancel", remove any uploaded images & keep code in queue.
+   * If user presses "Cancel", remove any uploaded images & keep the code in queue.
    */
   document.getElementById('cancelBtn').addEventListener('click', async () => {
     try {
@@ -433,13 +457,18 @@
     }
   });
 
-  // On page load, restore any existing code from localStorage and start real-time listener
+  // On page load, restore any existing code from localStorage and start real-time listener.
+  // If no code is stored, we will automatically select the first doc in the queue once the snapshot is loaded.
   window.onload = () => {
     currentCode = localStorage.getItem('currentCode') || '';
     currentDocId = localStorage.getItem('currentDocId') || '';
+
+    // If a code was stored, set up the UI with that code right away
     if (currentCode) {
       setupUIWithCurrentCode();
     }
+
+    // Start the real-time listener
     startQueueListener();
   };
 </script>
