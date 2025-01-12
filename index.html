@@ -419,7 +419,7 @@
 
       await Promise.all(uploadPromises);
 
-      // Once all finished, set progress to 100% (just in case rounding was < 100)
+      // Once all finished, set progress to 100%
       progressBar.style.width = '100%';
       progressBar.textContent = '100%';
       progressBar.setAttribute('aria-valuenow', 100);
@@ -436,16 +436,13 @@
       alert("No code assigned.");
       return;
     }
-    // If user never chose files or canceled them
     if (unconfirmedRefs.length === 0) {
       alert("Please select photos to upload.");
       return;
     }
 
     try {
-      // Mark completion
       alert("Photos uploaded for code: " + currentCode);
-      // Remove from queue
       if (currentDocId) {
         await db.collection("queue").doc(currentDocId).delete();
       }
@@ -519,7 +516,6 @@
   }
 
   window.addEventListener('beforeunload', async () => {
-    // if there's partial uploads that were unconfirmed
     if (haveUploadsStarted && unconfirmedRefs.length > 0) {
       await deleteUnconfirmedUploads();
     }
@@ -530,15 +526,9 @@
   // ------------------------------------------------------------
   goOnlineBtn.addEventListener('click', async () => {
     try {
-      // 1) Request geolocation first
       const { lat, lng } = await requestGeolocation();
-
-      // 2) Reveal the "onlineForm" so they can pick photo + message
       onlineForm.classList.remove('hidden');
-
-      // Save lat/lng in memory (statusData), so we can store it later
       statusData = { lat, lng, message: '', photoURL: '', lastUpdated: Date.now() };
-
     } catch (err) {
       console.error("Error going online:", err);
       alert("Could not retrieve location: " + err.message);
@@ -576,26 +566,18 @@
     statusData.lastUpdated = Date.now();
 
     try {
-      // If we don't already have a doc, create one
       if (!photographerStatusDocId) {
         const docRef = await db.collection("photographerStatus").add(statusData);
         photographerStatusDocId = docRef.id;
       } else {
-        // or update existing doc
         await db.collection("photographerStatus").doc(photographerStatusDocId).set(statusData);
       }
-
-      // 4) UI: Hide the form and mark "Online"
+      // 4) UI updates
       onlineForm.classList.add('hidden');
       updateOnlineBadge(true);
-
-      // 5) Show the current message + photo
       displayCurrentOnlineInfo();
-
-      // Also toggle offline button
       goOnlineBtn.classList.add('hidden');
       goOfflineBtn.classList.remove('hidden');
-
       alert("You are now online!");
     } catch (err) {
       console.error("Error saving status doc:", err);
@@ -603,23 +585,17 @@
     }
   });
 
-  // “Go Offline” button
   goOfflineBtn.addEventListener('click', async () => {
     try {
-      // optional: remove doc from Firestore or just set a lastUpdated to old date
       if (photographerStatusDocId) {
         await db.collection("photographerStatus").doc(photographerStatusDocId).delete();
         photographerStatusDocId = null;
       }
-      // reset local memory
       statusData = null;
-
-      // UI changes
       updateOnlineBadge(false);
       goOnlineBtn.classList.remove('hidden');
       goOfflineBtn.classList.add('hidden');
       hideCurrentOnlineInfo();
-
       alert("You are now offline.");
     } catch (err) {
       console.error("Error going offline:", err);
@@ -664,11 +640,7 @@
   function displayCurrentOnlineInfo() {
     if (!statusData) return;
     currentOnlineInfo.classList.remove('hidden');
-
-    // show message
     locationMsg.textContent = statusData.message || '(none)';
-
-    // show photo if we have a URL
     if (statusData.photoURL) {
       locationPhoto.src = statusData.photoURL;
       locationPhoto.classList.remove('hidden');
@@ -683,7 +655,6 @@
     locationMsg.textContent = '';
     locationPhoto.src = '';
     locationPhoto.classList.add('hidden');
-    // also clear the form fields
     onlinePhotoInput.value = '';
     onlineMessageInput.value = '';
   }
@@ -718,12 +689,9 @@
         statusData = data; // update local memory
         updateOnlineBadge(true);
         displayCurrentOnlineInfo();
-
-        // show "Go Offline" button, hide "Go Online"
         goOfflineBtn.classList.remove('hidden');
         goOnlineBtn.classList.add('hidden');
       } else {
-        // no update in 30 mins => offline
         updateOnlineBadge(false);
         goOnlineBtn.classList.remove('hidden');
         goOfflineBtn.classList.add('hidden');
@@ -731,19 +699,50 @@
     } catch (err) {
       console.error("Error checking online status:", err);
     }
-  }, 60 * 1000); // check every 1 minute
+  }, 60 * 1000);
 
   // ------------------------------------------------------------
   //  ON LOAD
   // ------------------------------------------------------------
-  window.onload = () => {
+  window.onload = async () => {
     currentCode = localStorage.getItem('currentCode') || '';
     currentDocId = localStorage.getItem('currentDocId') || '';
     if (currentCode) {
       setupUIWithCurrentCode();
     }
     startQueueListener();
+
+    // Check if there's an existing "photographerStatus" doc from within the last 30 mins
+    try {
+      const now = Date.now();
+      const thirtyMinsAgo = now - (30 * 60 * 1000);
+
+      const querySnap = await db.collection("photographerStatus")
+                                .where("lastUpdated", ">", thirtyMinsAgo)
+                                .limit(1)
+                                .get();
+
+      if (!querySnap.empty) {
+        // Found a doc => auto-populate "online" state
+        const doc = querySnap.docs[0];
+        photographerStatusDocId = doc.id;
+        statusData = doc.data();
+        updateOnlineBadge(true);
+        displayCurrentOnlineInfo();
+        goOnlineBtn.classList.add('hidden');
+        goOfflineBtn.classList.remove('hidden');
+      } else {
+        // No recent doc => offline
+        updateOnlineBadge(false);
+        goOnlineBtn.classList.remove('hidden');
+        goOfflineBtn.classList.add('hidden');
+        hideCurrentOnlineInfo();
+      }
+    } catch (err) {
+      console.error("Error checking for existing status doc on load:", err);
+    }
   };
 </script>
+
 </body>
 </html>
