@@ -162,7 +162,10 @@
     Assigned Code: <strong id="queueCode"></strong>
   </p>
 
-  <!-- UPLOAD SECTION (Paid Photos) -->
+  <!-- 
+       MAIN UPLOAD SECTION (Paid Photos) 
+       Added a simple progress bar below the input
+  -->
   <div class="text-center">
     <input
       type="file"
@@ -177,6 +180,21 @@
     <button id="cancelBtn" class="hidden btn btn-secondary mt-3">
       Cancel
     </button>
+
+    <!-- Simple progress bar -->
+    <div id="progressContainer" class="progress hidden mt-3" style="width:80%; margin:0 auto;">
+      <div
+        id="progressBar"
+        class="progress-bar"
+        role="progressbar"
+        style="width: 0%;"
+        aria-valuenow="0"
+        aria-valuemin="0"
+        aria-valuemax="100"
+      >
+        0%
+      </div>
+    </div>
   </div>
 
   <!-- QUEUE LIST CARD -->
@@ -218,6 +236,11 @@
   let unconfirmedRefs = [];
   let haveUploadsStarted = false;
 
+  // For the progress bar
+  let totalBytes = 0;
+  let totalTransferred = 0;
+  let fileProgress = []; // will store bytesTransferred for each file
+
   // We'll store an ID for the "photographerStatus" doc if we create one
   let photographerStatusDocId = null;
   // We'll store the last known data from that doc so we can display it
@@ -234,6 +257,10 @@
   const currentOnlineInfo = document.getElementById('currentOnlineInfo');
   const locationMsg = document.getElementById('locationMsg');
   const locationPhoto = document.getElementById('locationPhoto');
+
+  // Progress bar DOM
+  const progressContainer = document.getElementById('progressContainer');
+  const progressBar = document.getElementById('progressBar');
 
   // ------------------------------------------------------------
   //  QUEUE LISTENER
@@ -317,26 +344,45 @@
   //  PAID PHOTO UPLOAD (MAIN)
   // ------------------------------------------------------------
   document.getElementById('upload').addEventListener('change', async (e) => {
+    // 1) Ensure we have a code
     if (!currentCode) {
       alert('Please select or retrieve a code first.');
       e.target.value = '';
       return;
     }
 
+    // 2) If we had any unconfirmed uploads from before, delete them
     if (unconfirmedRefs.length > 0) {
       await deleteUnconfirmedUploads();
     }
 
+    // 3) If user cleared the file input
     if (e.target.files.length === 0) {
       document.getElementById('cancelBtn').classList.add('hidden');
       return;
     }
 
+    // 4) Start fresh for progress
     haveUploadsStarted = true;
     unconfirmedRefs = [];
     document.getElementById('cancelBtn').classList.remove('hidden');
 
+    // Prepare progress tracking
+    totalBytes = 0;
+    totalTransferred = 0;
+    fileProgress = [];
+    progressBar.style.width = '0%';
+    progressBar.textContent = '0%';
+    progressBar.setAttribute('aria-valuenow', 0);
+    progressContainer.classList.remove('hidden');
+
     const files = e.target.files;
+    for (let i = 0; i < files.length; i++) {
+      totalBytes += files[i].size;
+      fileProgress.push(0);
+    }
+
+    // 5) Upload each file in parallel
     try {
       const uploadPromises = [];
       for (let i = 0; i < files.length; i++) {
@@ -345,14 +391,39 @@
         const uploadTask = ref.put(file);
 
         const p = new Promise((resolve, reject) => {
-          uploadTask.on('state_changed', null, reject, () => {
-            unconfirmedRefs.push(uploadTask.snapshot.ref);
-            resolve();
-          });
+          uploadTask.on(
+            'state_changed',
+            (snapshot) => {
+              // Update progress
+              const currentTransferred = snapshot.bytesTransferred;
+              // The difference from last time
+              const oldVal = fileProgress[i];
+              fileProgress[i] = currentTransferred;
+              totalTransferred += (currentTransferred - oldVal);
+
+              const progressPercent = (totalTransferred / totalBytes) * 100;
+              progressBar.style.width = `${progressPercent.toFixed(1)}%`;
+              progressBar.textContent = `${Math.floor(progressPercent)}%`;
+              progressBar.setAttribute('aria-valuenow', Math.floor(progressPercent));
+            },
+            (err) => reject(err),
+            () => {
+              // On complete
+              unconfirmedRefs.push(uploadTask.snapshot.ref);
+              resolve();
+            }
+          );
         });
         uploadPromises.push(p);
       }
+
       await Promise.all(uploadPromises);
+
+      // Once all finished, set progress to 100% (just in case rounding was < 100)
+      progressBar.style.width = '100%';
+      progressBar.textContent = '100%';
+      progressBar.setAttribute('aria-valuenow', 100);
+
     } catch (err) {
       console.error("Error uploading photos:", err);
       alert("Error uploading photos: " + err.message);
@@ -360,18 +431,21 @@
   });
 
   document.getElementById('uploadBtn').addEventListener('click', async () => {
+    // Only finalize if there is a code and we actually have unconfirmed uploads
     if (!currentCode) {
       alert("No code assigned.");
       return;
     }
-    const uploadInput = document.getElementById('upload');
-    if (uploadInput.files.length === 0 || unconfirmedRefs.length === 0) {
+    // If user never chose files or canceled them
+    if (unconfirmedRefs.length === 0) {
       alert("Please select photos to upload.");
       return;
     }
 
     try {
+      // Mark completion
       alert("Photos uploaded for code: " + currentCode);
+      // Remove from queue
       if (currentDocId) {
         await db.collection("queue").doc(currentDocId).delete();
       }
@@ -427,15 +501,25 @@
     document.getElementById('cancelBtn').classList.add('hidden');
     document.getElementById('upload').value = '';
 
+    // Hide progress bar
+    progressContainer.classList.add('hidden');
+    progressBar.style.width = '0%';
+    progressBar.textContent = '0%';
+    progressBar.setAttribute('aria-valuenow', 0);
+
     localStorage.removeItem('currentCode');
     localStorage.removeItem('currentDocId');
     currentCode = '';
     currentDocId = '';
     unconfirmedRefs = [];
     haveUploadsStarted = false;
+    totalBytes = 0;
+    totalTransferred = 0;
+    fileProgress = [];
   }
 
   window.addEventListener('beforeunload', async () => {
+    // if there's partial uploads that were unconfirmed
     if (haveUploadsStarted && unconfirmedRefs.length > 0) {
       await deleteUnconfirmedUploads();
     }
