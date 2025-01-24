@@ -111,14 +111,25 @@
       <button id="goOnlineBtn" class="btn btn-primary">Go Online</button>
       <button id="goOfflineBtn" class="btn btn-secondary hidden">Go Offline</button>
 
-      <!-- 3) "Form" to pick a photo & enter a message, only visible after clicking "Go Online" -->
+      <!-- 3) "Form" to pick a selfie & enter a message, only visible after clicking "Go Online" -->
       <div id="onlineForm" class="hidden mt-3">
-        <input 
-          type="file" 
-          id="onlinePhotoInput" 
-          accept="image/*" 
-          class="form-control-file"
+        <p class="font-weight-bold">
+          Please upload a selfie to indicate where you are:
+        </p>
+        <!-- 
+             Hide the file input, show a label button instead 
+             Clicking the label triggers the hidden file input
+         -->
+        <label for="onlinePhotoInput" class="btn btn-info mb-2">
+          Upload Selfie (Show Where You Are)
+        </label>
+        <input
+          type="file"
+          id="onlinePhotoInput"
+          accept="image/*"
+          class="form-control-file hidden"
         />
+
         <textarea
           id="onlineMessageInput"
           class="form-control mt-2"
@@ -164,7 +175,7 @@
 
   <!-- 
        MAIN UPLOAD SECTION (Paid Photos) 
-       Added a simple progress bar below the input
+       Includes a simple progress bar below the input
   -->
   <div class="text-center">
     <input
@@ -525,19 +536,30 @@
   //  GO ONLINE / GO OFFLINE Logic
   // ------------------------------------------------------------
   goOnlineBtn.addEventListener('click', async () => {
+    // CHANGE STARTS HERE:
+    // --------------------------------------------------------
+    let lat = null;
+    let lng = null;
+
     try {
-      const { lat, lng } = await requestGeolocation();
-      onlineForm.classList.remove('hidden');
-      statusData = { lat, lng, message: '', photoURL: '', lastUpdated: Date.now() };
+      const coords = await requestGeolocation();
+      lat = coords.lat;
+      lng = coords.lng;
     } catch (err) {
-      console.error("Error going online:", err);
-      alert("Could not retrieve location: " + err.message);
+      console.error("Could not retrieve location. Please enable location services if you want to share your location.", err);
+      alert("Location could not be retrieved. Please enable location services if you want to share your location.");
     }
+
+    // Even if we couldn't get location, show the form so the user can still go online.
+    onlineForm.classList.remove('hidden');
+    statusData = { lat, lng, message: '', photoURL: '', lastUpdated: Date.now() };
+    // --------------------------------------------------------
+    // CHANGE ENDS HERE
   });
 
   uploadOnlineBtn.addEventListener('click', async () => {
     if (!statusData) {
-      alert("No location data. Please click 'Go Online' again.");
+      alert("No location data object. Please click 'Go Online' again.");
       return;
     }
 
@@ -743,6 +765,7 @@
     }
   };
 </script>
+
 
 </body>
 </html>
